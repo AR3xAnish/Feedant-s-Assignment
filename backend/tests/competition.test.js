@@ -114,8 +114,6 @@ describe('Competition Details & Registration Business Logic Test Suite', () => {
   // 2. Concurrency & Capacity Race Protection
   describe('Concurrency & Capacity Protection', () => {
     it('should prevent overbooking when multiple concurrent users race for remaining spots', async () => {
-      // testComp has maxParticipants: 2 and 0 booked spots.
-      // Create 6 unique users who all try to register simultaneously.
       const candidateUsers = [];
       for (let i = 1; i <= 6; i++) {
         candidateUsers.push(
@@ -202,7 +200,7 @@ describe('Competition Details & Registration Business Logic Test Suite', () => {
       expect(res2.status).toBe(201);
       expect(res2.body.success).toBe(true);
       expect(res2.body.data.registration._id).toBe(regId);
-      expect(res2.body.data.isDuplicateSubmission).toBe(true);
+      expect(res2.body.data.idempotentReplay).toBe(true);
       expect(res2.body.data).toHaveProperty('competition');
       expect(res2.body.data).toHaveProperty('computed');
 
@@ -285,10 +283,9 @@ describe('Competition Details & Registration Business Logic Test Suite', () => {
     });
   });
 
-  // 6. Overlapping Windows & Lifecycle Restrictions
+  // 6. Overlapping Windows, Lifecycle States & Status Restrictions
   describe('Lifecycle State Rules', () => {
     it('should allow both registration and submission during overlapping window', async () => {
-      // testComp has registration open (until tomorrow) and submission open (started 30 mins ago)
       const res = await request(app).get(`/api/v1/competitions/${testComp._id}`);
       expect(res.body.data.computed.canRegister).toBe(true);
       expect(res.body.data.computed.canSubmit).toBe(true);
@@ -329,6 +326,60 @@ describe('Competition Details & Registration Business Logic Test Suite', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('REGISTRATION_NOT_STARTED');
+    });
+
+    it('should reject registration and submission for DRAFT competitions (HTTP 400)', async () => {
+      testComp.status = 'DRAFT';
+      await testComp.save();
+
+      const regRes = await request(app)
+        .post(`/api/v1/competitions/${testComp._id}/register`)
+        .set('x-user-id', testUser1._id.toString());
+      expect(regRes.status).toBe(400);
+      expect(regRes.body.error.code).toBe('COMPETITION_DRAFT');
+
+      const subRes = await request(app)
+        .post(`/api/v1/competitions/${testComp._id}/submissions`)
+        .set('x-user-id', testUser1._id.toString())
+        .send({ title: 'Draft test', videoUrl: 'https://v.com/1.mp4' });
+      expect(subRes.status).toBe(400);
+      expect(subRes.body.error.code).toBe('COMPETITION_DRAFT');
+    });
+
+    it('should reject registration and submission for CANCELLED competitions (HTTP 400)', async () => {
+      testComp.status = 'CANCELLED';
+      await testComp.save();
+
+      const regRes = await request(app)
+        .post(`/api/v1/competitions/${testComp._id}/register`)
+        .set('x-user-id', testUser1._id.toString());
+      expect(regRes.status).toBe(400);
+      expect(regRes.body.error.code).toBe('COMPETITION_CANCELLED');
+
+      const subRes = await request(app)
+        .post(`/api/v1/competitions/${testComp._id}/submissions`)
+        .set('x-user-id', testUser1._id.toString())
+        .send({ title: 'Cancelled test', videoUrl: 'https://v.com/1.mp4' });
+      expect(subRes.status).toBe(400);
+      expect(subRes.body.error.code).toBe('COMPETITION_CANCELLED');
+    });
+
+    it('should reject registration and submission for COMPLETED competitions (HTTP 400)', async () => {
+      testComp.status = 'COMPLETED';
+      await testComp.save();
+
+      const regRes = await request(app)
+        .post(`/api/v1/competitions/${testComp._id}/register`)
+        .set('x-user-id', testUser1._id.toString());
+      expect(regRes.status).toBe(400);
+      expect(regRes.body.error.code).toBe('COMPETITION_COMPLETED');
+
+      const subRes = await request(app)
+        .post(`/api/v1/competitions/${testComp._id}/submissions`)
+        .set('x-user-id', testUser1._id.toString())
+        .send({ title: 'Completed test', videoUrl: 'https://v.com/1.mp4' });
+      expect(subRes.status).toBe(400);
+      expect(subRes.body.error.code).toBe('COMPETITION_COMPLETED');
     });
   });
 });

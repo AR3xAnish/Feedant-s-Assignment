@@ -72,8 +72,21 @@ class CompetitionService {
       throw new AppError('Competition not found', 404, 'COMPETITION_NOT_FOUND');
     }
 
-    // 2. Check submission window
+    // 2. Lifecycle Validations
     const lifecycle = evaluateCompetitionLifecycle(competition);
+
+    if (competition.status === 'DRAFT') {
+      throw new AppError('This competition is in draft mode and not accepting submissions', 400, 'COMPETITION_DRAFT');
+    }
+
+    if (competition.status === 'CANCELLED') {
+      throw new AppError('This competition has been cancelled', 400, 'COMPETITION_CANCELLED');
+    }
+
+    if (competition.status === 'COMPLETED' || lifecycle.lifecycleStatus === 'COMPLETED') {
+      throw new AppError('This competition has already completed and submissions are closed', 400, 'COMPETITION_COMPLETED');
+    }
+
     if (!lifecycle.canSubmit) {
       throw new AppError(
         'Submission window is not currently active for this competition',

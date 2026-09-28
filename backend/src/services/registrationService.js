@@ -43,18 +43,18 @@ class RegistrationService {
         status: 'CONFIRMED',
       });
       if (existingIdempotent) {
-        // Return identical logical response on idempotency replay
+        // Return identical logical response on idempotency replay (operation replay guarantee)
         return {
           registration: existingIdempotent,
           competition,
           computed: evaluateCompetitionLifecycle(competition),
-          isDuplicateSubmission: true,
+          idempotentReplay: true,
           message: 'Registration already processed for this request key',
         };
       }
     }
 
-    // 4. Pre-check for active participation (fast reject)
+    // 4. Pre-check for active participation
     const existingActiveRegistration = await Registration.findOne({
       competitionId,
       userId,
@@ -67,20 +67,26 @@ class RegistrationService {
     // 5. Authoritative Lifecycle Validations
     const lifecycle = evaluateCompetitionLifecycle(competition);
 
+    if (competition.status === 'DRAFT') {
+      throw new AppError('This competition is in draft mode and not open for registration', 400, 'COMPETITION_DRAFT');
+    }
+
     if (competition.status === 'CANCELLED') {
       throw new AppError('This competition has been cancelled', 400, 'COMPETITION_CANCELLED');
     }
 
-    if (lifecycle.lifecycleStatus === 'UPCOMING') {
-      throw new AppError('Registration has not opened yet', 400, 'REGISTRATION_NOT_STARTED');
+    if (competition.status === 'COMPLETED' || lifecycle.lifecycleStatus === 'COMPLETED') {
+      throw new AppError('This competition has already completed', 400, 'COMPETITION_COMPLETED');
     }
 
-    if (new Date() >= new Date(competition.importantDates.registrationClosesAt)) {
+    if (!lifecycle.canRegister) {
+      if (lifecycle.lifecycleStatus === 'UPCOMING') {
+        throw new AppError('Registration has not opened yet', 400, 'REGISTRATION_NOT_STARTED');
+      }
+      if (lifecycle.isFull) {
+        throw new AppError('Competition is already full. No spots left.', 409, 'COMPETITION_FULL');
+      }
       throw new AppError('Registration for this competition has already closed', 400, 'REGISTRATION_CLOSED');
-    }
-
-    if (lifecycle.isFull || competition.bookedSpots >= competition.maxParticipants) {
-      throw new AppError('Competition is already full. No spots left.', 409, 'COMPETITION_FULL');
     }
 
     // 6. Check if MongoDB deployment supports multi-document transactions (ReplicaSet or Sharded)
@@ -100,15 +106,14 @@ class RegistrationService {
       }
     }
 
+    // PRIMARY PATH: Multi-Document ACID Transaction
     if (transactionSupported && session) {
       let finalRegistration = null;
       let finalUpdatedComp = null;
 
       try {
-        // withTransaction automatically manages transaction commit, abort,
-        // and retries on TransientTransactionErrors (such as WriteConflict code 112)
         await session.withTransaction(async () => {
-          // Atomic capacity reservation inside transaction
+          // 1. Atomic capacity guard & reservation inside transaction
           const updatedComp = await Competition.findOneAndUpdate(
             {
               _id: competitionId,
@@ -126,7 +131,7 @@ class RegistrationService {
 
           finalUpdatedComp = updatedComp;
 
-          // Check if active registration was committed concurrently inside transaction
+          // 2. Active registration check inside transaction
           const activeInsideTxn = await Registration.findOne({
             competitionId,
             userId,
@@ -137,22 +142,25 @@ class RegistrationService {
             throw new AppError('You are already registered for this competition', 409, 'ALREADY_REGISTERED');
           }
 
-          // Check if there is an existing CANCELLED registration to reactivate
-          const cancelledReg = await Registration.findOne({
-            competitionId,
-            userId,
-            status: 'CANCELLED',
-          }).session(session);
+          // 3. Atomically reactivate an existing CANCELLED registration if present
+          const reactivated = await Registration.findOneAndUpdate(
+            { competitionId, userId, status: 'CANCELLED' },
+            {
+              $set: {
+                status: 'CONFIRMED',
+                amountPaid: competition.entryFee,
+                idempotencyKey: idempotencyKey || undefined,
+                paymentId: `pay_razorpay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                registeredAt: new Date(),
+              },
+            },
+            { session, new: true }
+          );
 
-          if (cancelledReg) {
-            cancelledReg.status = 'CONFIRMED';
-            cancelledReg.amountPaid = competition.entryFee;
-            cancelledReg.idempotencyKey = idempotencyKey || undefined;
-            cancelledReg.paymentId = `pay_razorpay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-            cancelledReg.registeredAt = new Date();
-            await cancelledReg.save({ session });
-            finalRegistration = cancelledReg;
+          if (reactivated) {
+            finalRegistration = reactivated;
           } else {
+            // Create fresh registration record
             const created = await Registration.create(
               [
                 {
@@ -207,18 +215,23 @@ class RegistrationService {
 
     let registration;
     try {
-      const existing = await Registration.findOne({ competitionId, userId });
-      if (existing) {
-        if (existing.status === 'CONFIRMED') {
-          throw new AppError('You are already registered for this competition', 409, 'ALREADY_REGISTERED');
-        }
-        existing.status = 'CONFIRMED';
-        existing.amountPaid = competition.entryFee;
-        existing.idempotencyKey = idempotencyKey || undefined;
-        existing.paymentId = `pay_razorpay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        existing.registeredAt = new Date();
-        await existing.save();
-        registration = existing;
+      // Concurrency-safe reactivation of cancelled registration
+      const reactivated = await Registration.findOneAndUpdate(
+        { competitionId, userId, status: 'CANCELLED' },
+        {
+          $set: {
+            status: 'CONFIRMED',
+            amountPaid: competition.entryFee,
+            idempotencyKey: idempotencyKey || undefined,
+            paymentId: `pay_razorpay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            registeredAt: new Date(),
+          },
+        },
+        { new: true }
+      );
+
+      if (reactivated) {
+        registration = reactivated;
       } else {
         registration = await Registration.create({
           competitionId,

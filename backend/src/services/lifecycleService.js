@@ -5,6 +5,18 @@
  */
 
 const calculateCountdown = (targetDate, now = new Date()) => {
+  if (!targetDate) {
+    return {
+      totalSecondsRemaining: 0,
+      days: 0,
+      hours: 0,
+      minutes: 0,
+      seconds: 0,
+      isExpired: true,
+      formatted: '00d : 00h : 00m : 00s',
+    };
+  }
+
   const diffMs = new Date(targetDate).getTime() - new Date(now).getTime();
   if (diffMs <= 0) {
     return {
@@ -50,28 +62,34 @@ const evaluateCompetitionLifecycle = (competition, now = new Date()) => {
 
   const spotsLeft = Math.max(0, maxParticipants - bookedSpots);
   const isFull = bookedSpots >= maxParticipants;
+  const isExpiredByResult = currentDate >= resDate;
 
   // 1. Explicit Action Permissions (authoritative booleans)
+  // Strict requirement: Only ACTIVE competitions within active chronological windows accept actions
   const canRegister =
-    status !== 'CANCELLED' &&
+    status === 'ACTIVE' &&
+    !isExpiredByResult &&
     currentDate >= regStart &&
     currentDate < regClose &&
     !isFull;
 
   const canSubmit =
-    status !== 'CANCELLED' &&
+    status === 'ACTIVE' &&
+    !isExpiredByResult &&
     currentDate >= subStart &&
     currentDate < subEnd;
 
   // 2. Overall Phase Separation
   let competitionPhase = 'ACTIVE';
 
-  if (status === 'CANCELLED') {
+  if (status === 'DRAFT') {
+    competitionPhase = 'DRAFT';
+  } else if (status === 'CANCELLED') {
     competitionPhase = 'CANCELLED';
+  } else if (status === 'COMPLETED' || isExpiredByResult) {
+    competitionPhase = 'COMPLETED';
   } else if (currentDate < regStart) {
     competitionPhase = 'UPCOMING';
-  } else if (currentDate >= resDate || status === 'COMPLETED') {
-    competitionPhase = 'COMPLETED';
   } else if (currentDate >= subEnd && currentDate < resDate) {
     competitionPhase = 'JUDGING';
   } else if (canRegister && canSubmit) {
@@ -96,7 +114,34 @@ const evaluateCompetitionLifecycle = (competition, now = new Date()) => {
     countdown: calculateCountdown(regClose, currentDate),
   };
 
-  if (competitionPhase === 'UPCOMING') {
+  if (competitionPhase === 'DRAFT') {
+    countdownConfig = {
+      type: 'DRAFT',
+      title: 'Competition in Draft Mode',
+      badge: 'Draft',
+      targetDate: null,
+      isActive: false,
+      countdown: calculateCountdown(null, currentDate),
+    };
+  } else if (competitionPhase === 'CANCELLED') {
+    countdownConfig = {
+      type: 'CANCELLED',
+      title: 'Competition has been cancelled',
+      badge: 'Cancelled',
+      targetDate: null,
+      isActive: false,
+      countdown: calculateCountdown(null, currentDate),
+    };
+  } else if (competitionPhase === 'COMPLETED') {
+    countdownConfig = {
+      type: 'COMPLETED',
+      title: 'Competition completed - Winners announced',
+      badge: 'Completed',
+      targetDate: null,
+      isActive: false,
+      countdown: calculateCountdown(null, currentDate),
+    };
+  } else if (competitionPhase === 'UPCOMING') {
     countdownConfig = {
       type: 'REGISTRATION_OPENS',
       title: 'Registration opens in',
@@ -132,15 +177,6 @@ const evaluateCompetitionLifecycle = (competition, now = new Date()) => {
       isActive: false,
       countdown: calculateCountdown(resDate, currentDate),
     };
-  } else if (competitionPhase === 'COMPLETED') {
-    countdownConfig = {
-      type: 'COMPLETED',
-      title: 'Competition completed - Winners announced',
-      badge: 'Completed',
-      targetDate: null,
-      isActive: false,
-      countdown: calculateCountdown(currentDate, currentDate),
-    };
   } else if (isFull) {
     countdownConfig = {
       type: 'FULL',
@@ -148,7 +184,7 @@ const evaluateCompetitionLifecycle = (competition, now = new Date()) => {
       badge: 'Sold out',
       targetDate: null,
       isActive: false,
-      countdown: calculateCountdown(currentDate, currentDate),
+      countdown: calculateCountdown(null, currentDate),
     };
   } else {
     countdownConfig = {
@@ -157,7 +193,7 @@ const evaluateCompetitionLifecycle = (competition, now = new Date()) => {
       badge: 'Closed',
       targetDate: null,
       isActive: false,
-      countdown: calculateCountdown(currentDate, currentDate),
+      countdown: calculateCountdown(null, currentDate),
     };
   }
 
