@@ -1,0 +1,24 @@
+{
+  "name": "feedants-competition-backend",
+  "version": "1.0.0",
+  "description": "Feedants Competition Details Feature - Production Quality Backend API",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node src/scripts/seed.js",
+    "test": "jest --runInBand --detectOpenHandles --forceExit",
+    "test:concurrency": "node src/scripts/testConcurrency.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "mongoose": "^8.9.5",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  }
+}
