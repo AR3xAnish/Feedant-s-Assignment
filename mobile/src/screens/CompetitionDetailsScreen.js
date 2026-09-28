@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../styles/colors';
+import { STRINGS } from '../utils/i18n';
 import competitionApi from '../api/competitionApi';
 
 // Subcomponents
@@ -47,10 +48,16 @@ export const CompetitionDetailsScreen = () => {
   const [error, setError] = useState(null);
   const [currentLanguage, setCurrentLanguage] = useState('ENG');
 
+  // Active translation dictionary
+  const t = STRINGS[currentLanguage] || STRINGS.ENG;
+
   // Modal states
   const [registrationModalVisible, setRegistrationModalVisible] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [registrationError, setRegistrationError] = useState(null);
+
+  // Stable session idempotency key across retries
+  const sessionRegistrationKeyRef = useRef(null);
 
   const [submissionModalVisible, setSubmissionModalVisible] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -68,7 +75,7 @@ export const CompetitionDetailsScreen = () => {
       // 1. Fetch demo users
       const usersData = await competitionApi.getUsers();
       setUsers(usersData);
-      
+
       // Default to User 1 (Aakash Sharma - already registered to match page 3)
       const defaultUser = usersData[0] || null;
       setCurrentUser(defaultUser);
@@ -77,7 +84,7 @@ export const CompetitionDetailsScreen = () => {
       const comps = await competitionApi.getCompetitions();
       setCompetitionsList(comps);
 
-      // 3. Select Featured Competition ("Feedants Classical Dance")
+      // 3. Select Featured Competition
       const featured =
         comps.find((c) => c.competition.slug === 'feedants-classical-dance' || c.competition.title.includes('Classical'))?.competition ||
         comps[0]?.competition ||
@@ -126,14 +133,25 @@ export const CompetitionDetailsScreen = () => {
     setRefreshing(false);
   }, [competition?._id, currentUser?._id]);
 
-  // Handle Registration
+  // Open Registration Modal with a stable session key
+  const handleOpenRegistration = () => {
+    setRegistrationError(null);
+    // Initialize or preserve idempotency key for this registration checkout session
+    if (!sessionRegistrationKeyRef.current) {
+      sessionRegistrationKeyRef.current = `idemp_${currentUser?._id || 'anon'}_${competition?._id || 'comp'}_${Date.now()}`;
+    }
+    setRegistrationModalVisible(true);
+  };
+
+  // Handle Registration (reuses session key on retry)
   const handleConfirmRegistration = async () => {
     if (!competition?._id || !currentUser?._id) return;
     try {
       setIsRegistering(true);
       setRegistrationError(null);
 
-      const idempotencyKey = `idemp_${currentUser._id}_${competition._id}_${Date.now()}`;
+      // Use the stable session idempotency key (guarantees idempotency on retries)
+      const idempotencyKey = sessionRegistrationKeyRef.current;
       const res = await competitionApi.register(competition._id, currentUser._id, idempotencyKey);
 
       // Instantly update screen with authoritative data returned from backend
@@ -146,8 +164,10 @@ export const CompetitionDetailsScreen = () => {
         hasSubmitted: false,
       });
 
+      // Clear session key after successful registration
+      sessionRegistrationKeyRef.current = null;
       setRegistrationModalVisible(false);
-      Alert.alert('Registration Successful', 'You have secured your spot for this competition!');
+      Alert.alert('Registration Confirmed', 'You have successfully secured your spot!');
     } catch (err) {
       setRegistrationError(err.message);
     } finally {
@@ -187,15 +207,15 @@ export const CompetitionDetailsScreen = () => {
   const handlePlayJudgeIntro = (judge) => {
     setVideoModalData({
       title: `${judge.name} - Judge Intro Video`,
-      url: judge.introVideoUrl,
+      url: judge.introVideoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
     });
     setVideoModalVisible(true);
   };
 
   const handleSelectWinner = (winner) => {
     setVideoModalData({
-      title: `${winner.name} - ${winner.rank} Performance Reel`,
-      url: winner.videoUrl,
+      title: `${winner.name} - ${winner.rank} Reel`,
+      url: winner.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
     });
     setVideoModalVisible(true);
   };
@@ -206,6 +226,18 @@ export const CompetitionDetailsScreen = () => {
       url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
     });
     setVideoModalVisible(true);
+  };
+
+  // Working Back Button Action
+  const handleGoBack = () => {
+    Alert.alert(
+      'Competitions',
+      'You are viewing the Competition Details. Select another competition to preview alternate lifecycle states:',
+      competitionsList.map((c) => ({
+        text: c.competition.title,
+        onPress: () => loadCompetition(c.competition._id, currentUser?._id),
+      })).concat([{ text: 'Stay Here', style: 'cancel' }])
+    );
   };
 
   // Loading Screen
@@ -241,6 +273,8 @@ export const CompetitionDetailsScreen = () => {
         currentUser={currentUser}
         users={users}
         onSelectUser={handleSelectUser}
+        onGoBack={handleGoBack}
+        t={t}
       />
 
       {/* Main Scrollable Content */}
@@ -255,15 +289,17 @@ export const CompetitionDetailsScreen = () => {
           competition={competition}
           computed={computed}
           userParticipation={userParticipation}
+          t={t}
         />
 
         {/* 3. Judge Profile Card */}
-        <JudgeCard judge={competition.judge} onPlayIntroVideo={handlePlayJudgeIntro} />
+        <JudgeCard judge={competition.judge} onPlayIntroVideo={handlePlayJudgeIntro} t={t} />
 
-        {/* 4. Dynamic Countdown Banner */}
+        {/* 4. Contextual Lifecycle Countdown Banner */}
         <CountdownBanner
+          computed={computed}
           targetDate={competition.importantDates?.registrationClosesAt}
-          isRegistrationClosed={computed?.lifecycleStatus === 'REGISTRATION_CLOSED' || computed?.isFull}
+          t={t}
         />
 
         {/* 5. Important Dates 2x2 Grid */}
@@ -276,7 +312,7 @@ export const CompetitionDetailsScreen = () => {
         />
 
         {/* 7. Tabbed Information (About, Judging Criteria, Rules) */}
-        <CompetitionTabsSection competition={competition} />
+        <CompetitionTabsSection competition={competition} t={t} />
 
         {/* 8. Rewards Breakdown Table */}
         <RewardsSection rewards={competition.rewards} />
@@ -298,9 +334,7 @@ export const CompetitionDetailsScreen = () => {
         {/* 11. Refer & Earn Banner */}
         <ReferralBanner
           referralCode={currentUser?.referralCode || 'referral123'}
-          onReferNow={() =>
-            Alert.alert('Referral Link', 'Referral link ready to share with your friends!')
-          }
+          t={t}
         />
 
         {/* 12. Hear From Our Users Reviews */}
@@ -316,14 +350,12 @@ export const CompetitionDetailsScreen = () => {
         computed={computed}
         userParticipation={userParticipation}
         loadingAction={isRegistering}
-        onRegisterPress={() => {
-          setRegistrationError(null);
-          setRegistrationModalVisible(true);
-        }}
+        onRegisterPress={handleOpenRegistration}
         onSubmitPress={() => {
           setSubmissionError(null);
           setSubmissionModalVisible(true);
         }}
+        t={t}
       />
 
       {/* 15. Standard Bottom Navigation Bar */}
@@ -332,7 +364,10 @@ export const CompetitionDetailsScreen = () => {
       {/* Interactive Modals */}
       <RegistrationModal
         visible={registrationModalVisible}
-        onClose={() => setRegistrationModalVisible(false)}
+        onClose={() => {
+          setRegistrationModalVisible(false);
+          // Only clear key if registration was not in a failed state you want to retry
+        }}
         competition={competition}
         onConfirmRegistration={handleConfirmRegistration}
         isProcessing={isRegistering}
@@ -351,6 +386,7 @@ export const CompetitionDetailsScreen = () => {
         visible={videoModalVisible}
         onClose={() => setVideoModalVisible(false)}
         title={videoModalData.title}
+        videoUrl={videoModalData.url}
       />
     </SafeAreaView>
   );

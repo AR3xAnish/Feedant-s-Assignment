@@ -10,47 +10,50 @@ export const BottomCTA = ({
   loadingAction,
   onRegisterPress,
   onSubmitPress,
+  t = {},
 }) => {
   if (!competition) return null;
 
   const isRegistered = userParticipation?.isRegistered;
-  const isSubmissionOpen = computed?.isSubmissionOpen;
-  const isRegistrationOpen = computed?.isRegistrationOpen;
+  const hasSubmitted = userParticipation?.hasSubmitted;
+  const canSubmit = computed?.canSubmit;
+  const canRegister = computed?.canRegister;
   const isFull = computed?.isFull;
-  const spotsLeft = computed?.spotsLeft;
+  const spotsLeft = computed?.spotsLeft ?? Math.max(0, competition.maxParticipants - competition.bookedSpots);
+  const judgeName = competition.judge?.name || 'Judge';
 
-  // Determine button title, subtitle, handler, and state
   let buttonTitle = '';
   let buttonSubtext = '';
   let onPressHandler = () => {};
   let isDisabled = false;
 
   if (isRegistered) {
-    if (userParticipation?.hasSubmitted) {
-      buttonTitle = 'Entry Submitted ✓';
-      buttonSubtext = 'Under review by Manju Dubey';
+    if (hasSubmitted) {
+      buttonTitle = t.entrySubmitted || 'Entry Submitted ✓';
+      buttonSubtext = t.underReviewBy ? t.underReviewBy(judgeName) : `Under review by ${judgeName}`;
       isDisabled = true;
-    } else if (isSubmissionOpen) {
-      buttonTitle = 'Upload Submission';
-      buttonSubtext = 'Registered';
+    } else if (canSubmit) {
+      buttonTitle = t.uploadSubmission || 'Upload Submission';
+      buttonSubtext = t.registered || 'Registered';
       onPressHandler = onSubmitPress;
     } else {
       buttonTitle = 'Submission Opens Soon';
-      buttonSubtext = 'Registered';
+      buttonSubtext = t.registered || 'Registered';
       isDisabled = true;
     }
   } else {
-    // Unregistered state
+    // Unregistered path
     if (isFull) {
-      buttonTitle = 'Housefull';
+      buttonTitle = t.housefull || 'Housefull';
       buttonSubtext = 'All spots booked';
       isDisabled = true;
-    } else if (!isRegistrationOpen) {
-      buttonTitle = 'Registration Closed';
+    } else if (!canRegister) {
+      buttonTitle = t.registrationClosed || 'Registration Closed';
       buttonSubtext = 'Participation period ended';
       isDisabled = true;
     } else {
-      buttonTitle = `Register Now • ${formatCurrency(competition.entryFee)}`;
+      const feeFormatted = formatCurrency(competition.entryFee);
+      buttonTitle = t.registerNow ? t.registerNow(feeFormatted) : `Register Now • ${feeFormatted}`;
       buttonSubtext = spotsLeft === 1 ? 'Only 1 spot left!' : `Only ${spotsLeft} spots left`;
       onPressHandler = onRegisterPress;
     }

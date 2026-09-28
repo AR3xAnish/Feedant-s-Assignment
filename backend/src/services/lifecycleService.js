@@ -1,6 +1,7 @@
 /**
  * Lifecycle Service
- * Authoritative evaluation of time-dependent competition lifecycle status
+ * Authoritative evaluation of time-dependent competition lifecycle status,
+ * decoupled phase status, explicit user action permissions, and contextual countdowns.
  */
 
 const calculateCountdown = (targetDate, now = new Date()) => {
@@ -12,7 +13,7 @@ const calculateCountdown = (targetDate, now = new Date()) => {
       hours: 0,
       minutes: 0,
       seconds: 0,
-      isClosed: true,
+      isExpired: true,
       formatted: '00d : 00h : 00m : 00s',
     };
   }
@@ -32,14 +33,14 @@ const calculateCountdown = (targetDate, now = new Date()) => {
     hours,
     minutes,
     seconds,
-    isClosed: false,
+    isExpired: false,
     formatted,
   };
 };
 
 const evaluateCompetitionLifecycle = (competition, now = new Date()) => {
   const currentDate = new Date(now);
-  const { importantDates, bookedSpots, maxParticipants } = competition;
+  const { importantDates, bookedSpots, maxParticipants, status } = competition;
 
   const regStart = new Date(importantDates.registrationStartsAt);
   const regClose = new Date(importantDates.registrationClosesAt);
@@ -50,41 +51,130 @@ const evaluateCompetitionLifecycle = (competition, now = new Date()) => {
   const spotsLeft = Math.max(0, maxParticipants - bookedSpots);
   const isFull = bookedSpots >= maxParticipants;
 
-  let lifecycleStatus = 'ACTIVE';
+  // 1. Explicit Action Permissions (authoritative booleans)
+  const canRegister =
+    status !== 'CANCELLED' &&
+    currentDate >= regStart &&
+    currentDate < regClose &&
+    !isFull;
 
-  if (currentDate < regStart) {
-    lifecycleStatus = 'UPCOMING';
-  } else if (currentDate >= resDate) {
-    lifecycleStatus = 'COMPLETED';
+  const canSubmit =
+    status !== 'CANCELLED' &&
+    currentDate >= subStart &&
+    currentDate < subEnd;
+
+  // 2. Overall Phase Separation
+  let competitionPhase = 'ACTIVE';
+
+  if (status === 'CANCELLED') {
+    competitionPhase = 'CANCELLED';
+  } else if (currentDate < regStart) {
+    competitionPhase = 'UPCOMING';
+  } else if (currentDate >= resDate || status === 'COMPLETED') {
+    competitionPhase = 'COMPLETED';
   } else if (currentDate >= subEnd && currentDate < resDate) {
-    lifecycleStatus = 'JUDGING';
-  } else if (currentDate >= regClose || isFull) {
-    lifecycleStatus = 'REGISTRATION_CLOSED';
+    competitionPhase = 'JUDGING';
+  } else if (canRegister && canSubmit) {
+    competitionPhase = 'REGISTRATION_AND_SUBMISSION_OPEN';
+  } else if (canRegister) {
+    competitionPhase = 'REGISTRATION_OPEN';
+  } else if (canSubmit) {
+    competitionPhase = 'SUBMISSION_OPEN';
+  } else if (isFull) {
+    competitionPhase = 'FULL';
   } else {
-    lifecycleStatus = 'REGISTRATION_OPEN';
+    competitionPhase = 'REGISTRATION_CLOSED';
   }
 
-  // Registration window check
-  const isRegistrationWindowOpen =
-    currentDate >= regStart && currentDate < regClose && !isFull && competition.status !== 'CANCELLED';
+  // 3. Contextual Countdown State (Never claims "Registration closes in" when not applicable)
+  let countdownConfig = {
+    type: 'REGISTRATION_CLOSES',
+    title: 'Registration closes in',
+    badge: 'Hurry up!',
+    targetDate: regClose,
+    isActive: false,
+    countdown: calculateCountdown(regClose, currentDate),
+  };
 
-  // Submission window check
-  const isSubmissionWindowOpen =
-    currentDate >= subStart && currentDate < subEnd && competition.status !== 'CANCELLED';
-
-  const registrationCountdown = calculateCountdown(regClose, currentDate);
-  const submissionCountdown = calculateCountdown(subEnd, currentDate);
+  if (competitionPhase === 'UPCOMING') {
+    countdownConfig = {
+      type: 'REGISTRATION_OPENS',
+      title: 'Registration opens in',
+      badge: 'Upcoming',
+      targetDate: regStart,
+      isActive: true,
+      countdown: calculateCountdown(regStart, currentDate),
+    };
+  } else if (canRegister) {
+    countdownConfig = {
+      type: 'REGISTRATION_CLOSES',
+      title: 'Registration closes in',
+      badge: 'Hurry up!',
+      targetDate: regClose,
+      isActive: true,
+      countdown: calculateCountdown(regClose, currentDate),
+    };
+  } else if (canSubmit) {
+    countdownConfig = {
+      type: 'SUBMISSION_CLOSES',
+      title: 'Submissions close in',
+      badge: 'Submit entry',
+      targetDate: subEnd,
+      isActive: true,
+      countdown: calculateCountdown(subEnd, currentDate),
+    };
+  } else if (competitionPhase === 'JUDGING') {
+    countdownConfig = {
+      type: 'RESULTS_ANNOUNCED',
+      title: 'Judging in progress - Results on',
+      badge: 'Judging',
+      targetDate: resDate,
+      isActive: false,
+      countdown: calculateCountdown(resDate, currentDate),
+    };
+  } else if (competitionPhase === 'COMPLETED') {
+    countdownConfig = {
+      type: 'COMPLETED',
+      title: 'Competition completed - Winners announced',
+      badge: 'Completed',
+      targetDate: null,
+      isActive: false,
+      countdown: calculateCountdown(currentDate, currentDate),
+    };
+  } else if (isFull) {
+    countdownConfig = {
+      type: 'FULL',
+      title: 'All spots booked - Registration full',
+      badge: 'Sold out',
+      targetDate: null,
+      isActive: false,
+      countdown: calculateCountdown(currentDate, currentDate),
+    };
+  } else {
+    countdownConfig = {
+      type: 'CLOSED',
+      title: 'Registration has closed',
+      badge: 'Closed',
+      targetDate: null,
+      isActive: false,
+      countdown: calculateCountdown(currentDate, currentDate),
+    };
+  }
 
   return {
-    lifecycleStatus,
-    isRegistrationOpen: isRegistrationWindowOpen,
-    isSubmissionOpen: isSubmissionWindowOpen,
+    lifecycleStatus: competitionPhase,
+    competitionPhase,
+    canRegister,
+    canSubmit,
+    isRegistrationOpen: canRegister,
+    isSubmissionOpen: canSubmit,
     isFull,
     spotsLeft,
     totalSpots: maxParticipants,
     bookedSpots,
-    registrationCountdown,
-    submissionCountdown,
+    countdownConfig,
+    registrationCountdown: calculateCountdown(regClose, currentDate),
+    submissionCountdown: calculateCountdown(subEnd, currentDate),
   };
 };
 

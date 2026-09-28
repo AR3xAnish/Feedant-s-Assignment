@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Competition = require('../models/Competition');
 const Registration = require('../models/Registration');
 const User = require('../models/User');
@@ -6,7 +7,15 @@ const { evaluateCompetitionLifecycle } = require('./lifecycleService');
 
 class RegistrationService {
   /**
-   * Register a user for a competition with atomic concurrency & capacity protection
+   * Register a user for a competition.
+   *
+   * PRIMARY PRODUCTION PATH:
+   * Multi-document ACID MongoDB Transaction with session.withTransaction()
+   * (which automatically retries on TransientTransactionError / WriteConflict).
+   *
+   * DEVELOPMENT FALLBACK:
+   * Explicit limited non-transactional atomic conditional counter update with compensating rollback,
+   * used solely when running against single-node standalone MongoDB where transactions are unsupported.
    */
   async registerUser({ competitionId, userId, idempotencyKey, paymentMethod = 'demo_razorpay' }) {
     if (!competitionId || !userId) {
@@ -19,30 +28,43 @@ class RegistrationService {
       throw new AppError('User not found', 404, 'USER_NOT_FOUND');
     }
 
-    // 2. Check Idempotency Key first if supplied
+    // 2. Retrieve competition
+    const competition = await Competition.findById(competitionId);
+    if (!competition) {
+      throw new AppError('Competition not found', 404, 'COMPETITION_NOT_FOUND');
+    }
+
+    // 3. Check Idempotency Key - correctly scoped to (competitionId + userId + idempotencyKey)
     if (idempotencyKey) {
-      const existingIdempotent = await Registration.findOne({ idempotencyKey, userId });
+      const existingIdempotent = await Registration.findOne({
+        competitionId,
+        userId,
+        idempotencyKey,
+        status: 'CONFIRMED',
+      });
       if (existingIdempotent) {
+        // Return identical logical response on idempotency replay
         return {
           registration: existingIdempotent,
+          competition,
+          computed: evaluateCompetitionLifecycle(competition),
           isDuplicateSubmission: true,
           message: 'Registration already processed for this request key',
         };
       }
     }
 
-    // 3. Fast pre-check for existing registration
-    const existingRegistration = await Registration.findOne({ competitionId, userId });
-    if (existingRegistration) {
+    // 4. Pre-check for active participation (fast reject)
+    const existingActiveRegistration = await Registration.findOne({
+      competitionId,
+      userId,
+      status: 'CONFIRMED',
+    });
+    if (existingActiveRegistration) {
       throw new AppError('You are already registered for this competition', 409, 'ALREADY_REGISTERED');
     }
 
-    // 4. Retrieve competition & validate lifecycle
-    const competition = await Competition.findById(competitionId);
-    if (!competition) {
-      throw new AppError('Competition not found', 404, 'COMPETITION_NOT_FOUND');
-    }
-
+    // 5. Authoritative Lifecycle Validations
     const lifecycle = evaluateCompetitionLifecycle(competition);
 
     if (competition.status === 'CANCELLED') {
@@ -61,8 +83,113 @@ class RegistrationService {
       throw new AppError('Competition is already full. No spots left.', 409, 'COMPETITION_FULL');
     }
 
-    // 5. ATOMIC CAPACITY RESERVATION
-    // Uses atomic conditional update in MongoDB to prevent race conditions & overbooking
+    // 6. Check if MongoDB deployment supports multi-document transactions (ReplicaSet or Sharded)
+    const topology = mongoose.connection?.client?.topology?.description;
+    const transactionSupported = Boolean(
+      topology?.setName ||
+      topology?.type === 'ReplicaSetWithPrimary' ||
+      topology?.type === 'Sharded'
+    );
+
+    let session = null;
+    if (transactionSupported) {
+      try {
+        session = await mongoose.startSession();
+      } catch (err) {
+        session = null;
+      }
+    }
+
+    if (transactionSupported && session) {
+      let finalRegistration = null;
+      let finalUpdatedComp = null;
+
+      try {
+        // withTransaction automatically manages transaction commit, abort,
+        // and retries on TransientTransactionErrors (such as WriteConflict code 112)
+        await session.withTransaction(async () => {
+          // Atomic capacity reservation inside transaction
+          const updatedComp = await Competition.findOneAndUpdate(
+            {
+              _id: competitionId,
+              bookedSpots: { $lt: competition.maxParticipants },
+            },
+            {
+              $inc: { bookedSpots: 1 },
+            },
+            { session, new: true }
+          );
+
+          if (!updatedComp) {
+            throw new AppError('Competition became full while processing your request', 409, 'COMPETITION_FULL');
+          }
+
+          finalUpdatedComp = updatedComp;
+
+          // Check if active registration was committed concurrently inside transaction
+          const activeInsideTxn = await Registration.findOne({
+            competitionId,
+            userId,
+            status: 'CONFIRMED',
+          }).session(session);
+
+          if (activeInsideTxn) {
+            throw new AppError('You are already registered for this competition', 409, 'ALREADY_REGISTERED');
+          }
+
+          // Check if there is an existing CANCELLED registration to reactivate
+          const cancelledReg = await Registration.findOne({
+            competitionId,
+            userId,
+            status: 'CANCELLED',
+          }).session(session);
+
+          if (cancelledReg) {
+            cancelledReg.status = 'CONFIRMED';
+            cancelledReg.amountPaid = competition.entryFee;
+            cancelledReg.idempotencyKey = idempotencyKey || undefined;
+            cancelledReg.paymentId = `pay_razorpay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+            cancelledReg.registeredAt = new Date();
+            await cancelledReg.save({ session });
+            finalRegistration = cancelledReg;
+          } else {
+            const created = await Registration.create(
+              [
+                {
+                  competitionId,
+                  userId,
+                  amountPaid: competition.entryFee,
+                  status: 'CONFIRMED',
+                  idempotencyKey: idempotencyKey || undefined,
+                  paymentId: `pay_razorpay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                  registeredAt: new Date(),
+                },
+              ],
+              { session }
+            );
+            finalRegistration = created[0];
+          }
+        });
+
+        return {
+          registration: finalRegistration,
+          competition: finalUpdatedComp,
+          computed: evaluateCompetitionLifecycle(finalUpdatedComp),
+          message: 'Registration successful!',
+        };
+      } catch (txnError) {
+        if (txnError.code === 11000) {
+          throw new AppError('You are already registered for this competition', 409, 'ALREADY_REGISTERED');
+        }
+        throw txnError;
+      } finally {
+        await session.endSession();
+      }
+    }
+
+    // 7. Limited Non-Transactional Development Fallback (Standalone Mongo only)
+    // NOTE: This fallback is NOT equivalent to an ACID transaction; it is provided solely
+    // for single-node development where replica sets are unavailable.
     const updatedCompetition = await Competition.findOneAndUpdate(
       {
         _id: competitionId,
@@ -75,29 +202,41 @@ class RegistrationService {
     );
 
     if (!updatedCompetition) {
-      // Race condition caught: another concurrent request took the final spot
       throw new AppError('Competition became full while processing your request', 409, 'COMPETITION_FULL');
     }
 
-    // 6. Create registration record
     let registration;
     try {
-      registration = await Registration.create({
-        competitionId,
-        userId,
-        amountPaid: competition.entryFee,
-        status: 'CONFIRMED',
-        idempotencyKey: idempotencyKey || undefined,
-        paymentId: `pay_razorpay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      });
-    } catch (err) {
-      // Roll back spot reservation on any insertion failure (e.g. duplicate key race condition)
+      const existing = await Registration.findOne({ competitionId, userId });
+      if (existing) {
+        if (existing.status === 'CONFIRMED') {
+          throw new AppError('You are already registered for this competition', 409, 'ALREADY_REGISTERED');
+        }
+        existing.status = 'CONFIRMED';
+        existing.amountPaid = competition.entryFee;
+        existing.idempotencyKey = idempotencyKey || undefined;
+        existing.paymentId = `pay_razorpay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        existing.registeredAt = new Date();
+        await existing.save();
+        registration = existing;
+      } else {
+        registration = await Registration.create({
+          competitionId,
+          userId,
+          amountPaid: competition.entryFee,
+          status: 'CONFIRMED',
+          idempotencyKey: idempotencyKey || undefined,
+          paymentId: `pay_razorpay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          registeredAt: new Date(),
+        });
+      }
+    } catch (fallbackErr) {
+      // Compensating rollback for standalone development mode only
       await Competition.findByIdAndUpdate(competitionId, { $inc: { bookedSpots: -1 } });
-
-      if (err.code === 11000) {
+      if (fallbackErr.code === 11000) {
         throw new AppError('You are already registered for this competition', 409, 'ALREADY_REGISTERED');
       }
-      throw err;
+      throw fallbackErr;
     }
 
     return {
@@ -108,12 +247,9 @@ class RegistrationService {
     };
   }
 
-  /**
-   * Get registration details for a user in a competition
-   */
   async getUserRegistration(competitionId, userId) {
     if (!userId) return null;
-    return Registration.findOne({ competitionId, userId }).lean();
+    return Registration.findOne({ competitionId, userId, status: 'CONFIRMED' }).lean();
   }
 }
 

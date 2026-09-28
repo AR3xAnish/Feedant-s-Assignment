@@ -3,8 +3,11 @@ import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../styles/colors';
 
-export const JudgeCard = ({ judge, onPlayIntroVideo }) => {
+export const JudgeCard = ({ judge, onPlayIntroVideo, t = {} }) => {
   if (!judge) return null;
+
+  const judgeLabel = t.judge || 'Judge';
+  const introVideoLabel = t.introVideo || 'Intro Video';
 
   return (
     <View style={styles.card}>
@@ -13,7 +16,7 @@ export const JudgeCard = ({ judge, onPlayIntroVideo }) => {
 
       {/* Judge Info Details */}
       <View style={styles.detailsContainer}>
-        <Text style={styles.judgeLabel}>Judge</Text>
+        <Text style={styles.judgeLabel}>{judgeLabel}</Text>
         <Text style={styles.judgeName}>{judge.name}</Text>
         <Text style={styles.judgeTitle}>{judge.title}</Text>
         <Text style={styles.judgeExp}>{judge.experience}</Text>
@@ -28,7 +31,7 @@ export const JudgeCard = ({ judge, onPlayIntroVideo }) => {
         <View style={styles.playCircle}>
           <Ionicons name="play" size={16} color={COLORS.playButtonIcon} style={{ marginLeft: 2 }} />
         </View>
-        <Text style={styles.videoButtonText}>Intro Video</Text>
+        <Text style={styles.videoButtonText}>{introVideoLabel}</Text>
       </TouchableOpacity>
     </View>
   );

@@ -1,6 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Video, ResizeMode } from 'expo-av';
 import { COLORS } from '../styles/colors';
 import { formatCurrency } from '../utils/formatters';
 
@@ -14,6 +24,8 @@ export const RegistrationModal = ({
   error,
 }) => {
   if (!competition) return null;
+
+  const spotsLeft = Math.max(0, competition.maxParticipants - competition.bookedSpots);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -42,7 +54,7 @@ export const RegistrationModal = ({
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Spots Left:</Text>
               <Text style={[styles.detailValue, { color: COLORS.primary }]}>
-                {competition.maxParticipants - competition.bookedSpots} spots
+                {spotsLeft} spots
               </Text>
             </View>
           </View>
@@ -87,7 +99,7 @@ export const SubmissionModal = ({
   error,
 }) => {
   const [title, setTitle] = useState('');
-  const [videoUrl, setVideoUrl] = useState('https://storage.googleapis.com/feedants-entries/kathak_demo.mp4');
+  const [videoUrl, setVideoUrl] = useState('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
   const [description, setDescription] = useState('');
 
   const handleSubmit = () => {
@@ -155,23 +167,55 @@ export const SubmissionModal = ({
   );
 };
 
-// 3. Video Playback / Media Modal
-export const VideoModal = ({ visible, onClose, item, title }) => {
+// 3. Genuine Media Player Modal (Supports Web HTML5 video and Native expo-av)
+export const VideoModal = ({ visible, onClose, videoUrl, title }) => {
+  if (!visible) return null;
+
+  const validUrl =
+    videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.videoOverlay}>
         <View style={styles.videoPlayerBox}>
           <View style={styles.videoHeader}>
-            <Text style={styles.videoTitle} numberOfLines={1}>{title || 'Video Preview'}</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close-circle" size={24} color={COLORS.white} />
+            <Text style={styles.videoTitle} numberOfLines={1}>
+              {title || 'Media Playback'}
+            </Text>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="close-circle" size={26} color={COLORS.white} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.mockPlayer}>
-            <Ionicons name="play-circle" size={64} color={COLORS.primary} />
-            <Text style={styles.playingText}>Streaming Demo Media</Text>
-            <Text style={styles.playerSubtext}>Format: MP4 (1080p 60fps)</Text>
+          <View style={styles.mediaContainer}>
+            {Platform.OS === 'web' ? (
+              // On web, render native HTML5 video element for zero-friction video streaming
+              <video
+                src={validUrl}
+                controls
+                autoPlay
+                playsInline
+                style={{
+                  width: '100%',
+                  height: '260px',
+                  backgroundColor: '#000',
+                  borderRadius: '0 0 16px 16px',
+                  outline: 'none',
+                }}
+              />
+            ) : (
+              // On native iOS and Android, use expo-av Video
+              <Video
+                source={{ uri: validUrl }}
+                rate={1.0}
+                volume={1.0}
+                isMuted={false}
+                resizeMode={ResizeMode.CONTAIN}
+                shouldPlay
+                useNativeControls
+                style={styles.nativeVideo}
+              />
+            )}
           </View>
         </View>
       </View>
@@ -308,7 +352,7 @@ const styles = StyleSheet.create({
   },
   videoPlayerBox: {
     width: '100%',
-    maxWidth: 440,
+    maxWidth: 480,
     backgroundColor: '#0F172A',
     borderRadius: 16,
     overflow: 'hidden',
@@ -328,21 +372,14 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 10,
   },
-  mockPlayer: {
-    height: 240,
-    alignItems: 'center',
-    justifyContent: 'center',
+  mediaContainer: {
+    width: '100%',
     backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  playingText: {
-    color: COLORS.white,
-    fontSize: 14,
-    fontWeight: '600',
-    marginTop: 12,
-  },
-  playerSubtext: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 4,
+  nativeVideo: {
+    width: '100%',
+    height: 260,
   },
 });

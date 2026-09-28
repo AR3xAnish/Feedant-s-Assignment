@@ -1,15 +1,43 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Share, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../styles/colors';
 
-export const ReferralBanner = ({ referralCode = 'referral123', onReferNow }) => {
+export const ReferralBanner = ({ referralCode = 'referral123', t = {} }) => {
   const [copied, setCopied] = useState(false);
-  const referralLink = `https://feedants.com/r/${referralCode.toLowerCase()}`;
+  const referralLink = `https://feedants.com/r/${(referralCode || 'referral123').toLowerCase()}`;
 
-  const handleCopy = () => {
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const referAndEarnTitle = t.referAndEarn || 'Refer & Earn more discount';
+  const copyLinkLabel = copied ? (t.copied || 'Copied!') : (t.copyLink || 'Copy Link');
+  const referNowLabel = t.referNow || 'Refer Now';
+  const earnRewardLabel = t.earnReward || 'You earn ₹10 for every signup';
+
+  // 1. Real functional Clipboard Copy
+  const handleCopy = async () => {
+    try {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(referralLink);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch (err) {
+      console.warn('Clipboard write error:', err);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }
+  };
+
+  // 2. Real Native Share Action
+  const handleReferNow = async () => {
+    try {
+      await Share.share({
+        title: 'Feedants Competition Referral',
+        message: `Join me on Feedants using my referral link and get an instant discount: ${referralLink}`,
+        url: referralLink,
+      });
+    } catch (err) {
+      console.error('Share action error:', err);
+    }
   };
 
   return (
@@ -19,7 +47,7 @@ export const ReferralBanner = ({ referralCode = 'referral123', onReferNow }) => 
         <View style={styles.iconCircle}>
           <Ionicons name="megaphone-outline" size={18} color={COLORS.primary} />
         </View>
-        <Text style={styles.title}>Refer & Earn more discount</Text>
+        <Text style={styles.title}>{referAndEarnTitle}</Text>
       </View>
 
       {/* Referral Link & Actions */}
@@ -33,18 +61,16 @@ export const ReferralBanner = ({ referralCode = 'referral123', onReferNow }) => 
             selectTextOnFocus
           />
           <TouchableOpacity style={styles.copyButton} onPress={handleCopy} activeOpacity={0.7}>
-            <Text style={styles.copyText}>{copied ? 'Copied!' : 'Copy Link'}</Text>
+            <Text style={[styles.copyText, copied && { color: COLORS.primaryDark }]}>{copyLinkLabel}</Text>
           </TouchableOpacity>
         </View>
 
         {/* Refer Now CTA Button & Earning text */}
         <View style={styles.referActionCol}>
-          <TouchableOpacity style={styles.referButton} onPress={onReferNow} activeOpacity={0.8}>
-            <Text style={styles.referButtonText}>Refer Now</Text>
+          <TouchableOpacity style={styles.referButton} onPress={handleReferNow} activeOpacity={0.8}>
+            <Text style={styles.referButtonText}>{referNowLabel}</Text>
           </TouchableOpacity>
-          <Text style={styles.earnText}>
-            You earn <Text style={styles.earnBold}>₹10</Text> for every signup
-          </Text>
+          <Text style={styles.earnText}>{earnRewardLabel}</Text>
         </View>
       </View>
     </View>
@@ -131,9 +157,5 @@ const styles = StyleSheet.create({
   earnText: {
     fontSize: 11,
     color: COLORS.textSecondary,
-  },
-  earnBold: {
-    fontWeight: '700',
-    color: COLORS.textPrimary,
   },
 });

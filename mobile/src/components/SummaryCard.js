@@ -4,14 +4,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../styles/colors';
 import { formatCurrency } from '../utils/formatters';
 
-export const SummaryCard = ({ competition, computed, userParticipation }) => {
+export const SummaryCard = ({ competition, computed, userParticipation, t = {} }) => {
   if (!competition) return null;
 
   const isRegistered = userParticipation?.isRegistered;
-  const spotsLeft = computed?.spotsLeft ?? (competition.maxParticipants - competition.bookedSpots);
+  const spotsLeft = computed?.spotsLeft ?? Math.max(0, competition.maxParticipants - competition.bookedSpots);
   const bookedSpots = competition.bookedSpots || 0;
   const maxSpots = competition.maxParticipants || 20;
   const progressRatio = Math.min(1, bookedSpots / maxSpots);
+
+  const registeredLabel = t.registered || 'Registered';
+  const openLabel = t.open || 'Open';
+  const fullLabel = t.full || 'Full';
+  const prizePoolLabel = t.prizePool || 'Prize Pool';
+  const entryFeeLabel = t.entryFee || 'Entry Fee';
+  const spotsText = t.onlySpotsLeft ? t.onlySpotsLeft(spotsLeft) : (spotsLeft === 0 ? 'No spots left' : `Only ${spotsLeft} spots left`);
+  const bookedText = t.spotsBooked ? t.spotsBooked(bookedSpots, maxSpots) : `${bookedSpots} / ${maxSpots} Booked`;
 
   return (
     <View style={styles.card}>
@@ -24,44 +32,47 @@ export const SummaryCard = ({ competition, computed, userParticipation }) => {
         {isRegistered ? (
           <View style={styles.registeredBadge}>
             <Ionicons name="checkmark-circle" size={14} color={COLORS.primary} style={{ marginRight: 4 }} />
-            <Text style={styles.registeredBadgeText}>Registered</Text>
+            <Text style={styles.registeredBadgeText}>{registeredLabel}</Text>
           </View>
         ) : computed?.isFull ? (
           <View style={styles.fullBadge}>
-            <Text style={styles.fullBadgeText}>Full</Text>
+            <Text style={styles.fullBadgeText}>{fullLabel}</Text>
           </View>
         ) : (
           <View style={styles.openBadge}>
-            <Text style={styles.openBadgeText}>Open</Text>
+            <Text style={styles.openBadgeText}>{openLabel}</Text>
           </View>
         )}
       </View>
 
-      {/* Tags & Certificate Row */}
+      {/* Tags & Dynamic Perks Row */}
       <View style={styles.tagsRow}>
         {competition.tags?.map((tag, idx) => (
-          <View key={idx} style={styles.tagPill}>
+          <View key={`tag-${idx}`} style={styles.tagPill}>
             <Text style={styles.tagText}>{tag}</Text>
           </View>
         ))}
 
-        <View style={styles.perkContainer}>
-          <Ionicons name="trophy-outline" size={15} color={COLORS.primary} style={{ marginRight: 4 }} />
-          <Text style={styles.perkText}>Winners get certificate</Text>
-        </View>
+        {/* Dynamic Perks originating from backend data */}
+        {competition.perks?.map((perk, idx) => (
+          <View key={`perk-${idx}`} style={styles.perkContainer}>
+            <Ionicons name="trophy-outline" size={15} color={COLORS.primary} style={{ marginRight: 4 }} />
+            <Text style={styles.perkText}>{perk}</Text>
+          </View>
+        ))}
       </View>
 
       {/* Financials & Capacity Grid */}
       <View style={styles.statsRow}>
         {/* Prize Pool */}
         <View style={styles.statCol}>
-          <Text style={styles.statLabel}>Prize Pool</Text>
+          <Text style={styles.statLabel}>{prizePoolLabel}</Text>
           <Text style={styles.prizePoolValue}>{formatCurrency(competition.prizePool)}</Text>
         </View>
 
         {/* Entry Fee */}
         <View style={styles.statCol}>
-          <Text style={styles.statLabel}>Entry Fee</Text>
+          <Text style={styles.statLabel}>{entryFeeLabel}</Text>
           <Text style={styles.entryFeeValue}>{formatCurrency(competition.entryFee)}</Text>
         </View>
 
@@ -69,9 +80,7 @@ export const SummaryCard = ({ competition, computed, userParticipation }) => {
         <View style={styles.capacityCol}>
           <View style={styles.capacityTextRow}>
             <Ionicons name="people-outline" size={14} color={COLORS.primary} style={{ marginRight: 4 }} />
-            <Text style={styles.spotsLeftText}>
-              {spotsLeft === 0 ? 'No spots left' : `Only ${spotsLeft} spots left`}
-            </Text>
+            <Text style={styles.spotsLeftText}>{spotsText}</Text>
           </View>
 
           {/* Progress Bar */}
@@ -79,9 +88,7 @@ export const SummaryCard = ({ competition, computed, userParticipation }) => {
             <View style={[styles.progressBarFill, { width: `${Math.max(5, progressRatio * 100)}%` }]} />
           </View>
 
-          <Text style={styles.bookedText}>
-            {bookedSpots} / {maxSpots} Booked
-          </Text>
+          <Text style={styles.bookedText}>{bookedText}</Text>
         </View>
       </View>
     </View>

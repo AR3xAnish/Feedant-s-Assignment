@@ -3,14 +3,22 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../styles/colors';
 
-export const CompetitionTabsSection = ({ competition }) => {
+export const CompetitionTabsSection = ({ competition, t = {} }) => {
   const [activeTab, setActiveTab] = useState('ABOUT'); // 'ABOUT' | 'JUDGING' | 'RULES'
   const [isExpanded, setIsExpanded] = useState(false);
 
+  if (!competition) return null;
+
+  const aboutTabTitle = t.aboutTab || 'About Competition';
+  const judgingTabTitle = t.judgingTab || 'Judging Parameters';
+  const rulesTabTitle = t.rulesTab || 'Rules & Eligibility';
+  const viewMoreText = t.viewMore || 'View more';
+  const viewLessText = t.viewLess || 'View less';
+
   const tabs = [
-    { key: 'ABOUT', title: 'About Competition' },
-    { key: 'JUDGING', title: 'Judging Parameters' },
-    { key: 'RULES', title: 'Rules & Eligibility' },
+    { key: 'ABOUT', title: aboutTabTitle },
+    { key: 'JUDGING', title: judgingTabTitle },
+    { key: 'RULES', title: rulesTabTitle },
   ];
 
   return (
@@ -36,20 +44,36 @@ export const CompetitionTabsSection = ({ competition }) => {
       <View style={styles.contentBody}>
         {activeTab === 'ABOUT' && (
           <View>
-            <Text style={styles.paragraph}>
-              This is an online classical dance competition open for all age groups.
-            </Text>
-            <Text style={styles.paragraph}>Participate from anywhere and showcase your talent.</Text>
-            <Text style={styles.paragraph}>Express your passion through traditional dance.</Text>
+            {/* Dynamic about text originating from backend */}
+            <Text style={styles.paragraph}>{competition.about}</Text>
 
             {isExpanded && (
               <View style={styles.expandedContent}>
-                <Text style={styles.subheading}>Accepted Dance Styles:</Text>
-                <Text style={styles.listItem}>• Bharatanatyam, Kathak, Odissi, Kuchipudi</Text>
-                <Text style={styles.listItem}>• Mohiniyattam, Manipuri, Kathakali, Sattriya</Text>
-                <Text style={styles.subheading}>Evaluation:</Text>
-                <Text style={styles.listItem}>• Evaluated by recognized Kathak master Manju Dubey.</Text>
-                <Text style={styles.listItem}>• Official digital certificates will be awarded to all verified participants.</Text>
+                {competition.category ? (
+                  <>
+                    <Text style={styles.subheading}>Category:</Text>
+                    <Text style={styles.listItem}>• {competition.category}</Text>
+                  </>
+                ) : null}
+
+                {competition.judge ? (
+                  <>
+                    <Text style={styles.subheading}>Judge & Evaluator:</Text>
+                    <Text style={styles.listItem}>
+                      • {competition.judge.name} ({competition.judge.title})
+                    </Text>
+                    <Text style={styles.listItem}>• {competition.judge.experience}</Text>
+                  </>
+                ) : null}
+
+                {competition.perks && competition.perks.length > 0 ? (
+                  <>
+                    <Text style={styles.subheading}>Perks & Certifications:</Text>
+                    {competition.perks.map((perk, i) => (
+                      <Text key={i} style={styles.listItem}>• {perk}</Text>
+                    ))}
+                  </>
+                ) : null}
               </View>
             )}
 
@@ -58,7 +82,7 @@ export const CompetitionTabsSection = ({ competition }) => {
               onPress={() => setIsExpanded(!isExpanded)}
               activeOpacity={0.7}
             >
-              <Text style={styles.viewMoreText}>{isExpanded ? 'View less' : 'View more'}</Text>
+              <Text style={styles.viewMoreText}>{isExpanded ? viewLessText : viewMoreText}</Text>
               <Ionicons
                 name={isExpanded ? 'chevron-up' : 'chevron-down'}
                 size={16}
@@ -71,25 +95,33 @@ export const CompetitionTabsSection = ({ competition }) => {
 
         {activeTab === 'JUDGING' && (
           <View>
-            <Text style={styles.criteriaHeader}>How entries are scored (100 Points Total):</Text>
-            {competition.judgingCriteria?.map((item, idx) => (
-              <View key={idx} style={styles.bulletRow}>
-                <Ionicons name="checkmark-circle-outline" size={16} color={COLORS.primary} style={styles.bulletIcon} />
-                <Text style={styles.bulletText}>{item}</Text>
-              </View>
-            ))}
+            <Text style={styles.criteriaHeader}>Judging Criteria & Scoring:</Text>
+            {competition.judgingCriteria && competition.judgingCriteria.length > 0 ? (
+              competition.judgingCriteria.map((item, idx) => (
+                <View key={idx} style={styles.bulletRow}>
+                  <Ionicons name="checkmark-circle-outline" size={16} color={COLORS.primary} style={styles.bulletIcon} />
+                  <Text style={styles.bulletText}>{item}</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>Standard judging guidelines apply.</Text>
+            )}
           </View>
         )}
 
         {activeTab === 'RULES' && (
           <View>
-            <Text style={styles.criteriaHeader}>Important Guidelines & Eligibility:</Text>
-            {competition.rulesAndEligibility?.map((item, idx) => (
-              <View key={idx} style={styles.bulletRow}>
-                <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} style={styles.bulletIcon} />
-                <Text style={styles.bulletText}>{item}</Text>
-              </View>
-            ))}
+            <Text style={styles.criteriaHeader}>Rules & Eligibility Criteria:</Text>
+            {competition.rulesAndEligibility && competition.rulesAndEligibility.length > 0 ? (
+              competition.rulesAndEligibility.map((item, idx) => (
+                <View key={idx} style={styles.bulletRow}>
+                  <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} style={styles.bulletIcon} />
+                  <Text style={styles.bulletText}>{item}</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>General participation terms apply.</Text>
+            )}
           </View>
         )}
       </View>
@@ -196,5 +228,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textSecondary,
     lineHeight: 18,
+  },
+  emptyText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
   },
 });

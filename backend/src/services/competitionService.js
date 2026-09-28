@@ -22,9 +22,11 @@ class CompetitionService {
     };
 
     if (currentUserId) {
+      // Only CONFIRMED registrations count as active participation
       const registration = await Registration.findOne({
         competitionId: competition._id,
         userId: currentUserId,
+        status: 'CONFIRMED',
       }).lean();
 
       if (registration) {
@@ -64,14 +66,15 @@ class CompetitionService {
       throw new AppError('Title and Video URL are required for submission', 400, 'INVALID_INPUT');
     }
 
-    // 1. Verify competition exists & is in submission window
+    // 1. Verify competition exists
     const competition = await Competition.findById(competitionId);
     if (!competition) {
       throw new AppError('Competition not found', 404, 'COMPETITION_NOT_FOUND');
     }
 
+    // 2. Check submission window
     const lifecycle = evaluateCompetitionLifecycle(competition);
-    if (!lifecycle.isSubmissionOpen) {
+    if (!lifecycle.canSubmit) {
       throw new AppError(
         'Submission window is not currently active for this competition',
         400,
@@ -79,33 +82,44 @@ class CompetitionService {
       );
     }
 
-    // 2. Verify user is registered
-    const registration = await Registration.findOne({ competitionId, userId });
+    // 3. Verify user has a CONFIRMED registration (cancelled registrations cannot submit)
+    const registration = await Registration.findOne({
+      competitionId,
+      userId,
+      status: 'CONFIRMED',
+    });
     if (!registration) {
       throw new AppError(
-        'Only registered participants can submit entries',
+        'Only participants with a confirmed registration can submit entries',
         403,
         'REGISTRATION_REQUIRED'
       );
     }
 
-    // 3. Check for existing submission
+    // 4. Fast pre-check for existing submission
     const existingSubmission = await Submission.findOne({ competitionId, userId });
     if (existingSubmission) {
       throw new AppError('You have already submitted an entry for this competition', 409, 'ALREADY_SUBMITTED');
     }
 
-    const submission = await Submission.create({
-      competitionId,
-      userId,
-      registrationId: registration._id,
-      title,
-      videoUrl,
-      description,
-      status: 'SUBMITTED',
-    });
-
-    return submission;
+    // 5. Concurrency-safe submission creation (guards against simultaneous submissions)
+    try {
+      const submission = await Submission.create({
+        competitionId,
+        userId,
+        registrationId: registration._id,
+        title,
+        videoUrl,
+        description,
+        status: 'SUBMITTED',
+      });
+      return submission;
+    } catch (err) {
+      if (err.code === 11000) {
+        throw new AppError('You have already submitted an entry for this competition', 409, 'ALREADY_SUBMITTED');
+      }
+      throw err;
+    }
   }
 }
 

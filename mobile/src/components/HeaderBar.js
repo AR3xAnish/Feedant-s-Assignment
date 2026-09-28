@@ -3,20 +3,36 @@ import { View, Text, StyleSheet, TouchableOpacity, Modal, FlatList, Image } from
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../styles/colors';
 
-export const HeaderBar = ({ currentLanguage, onToggleLanguage, currentUser, users, onSelectUser }) => {
+export const HeaderBar = ({
+  currentLanguage,
+  onToggleLanguage,
+  currentUser,
+  users,
+  onSelectUser,
+  onGoBack,
+  t = {},
+}) => {
   const [userModalVisible, setUserModalVisible] = useState(false);
+
+  const goBackLabel = t.goBack || 'Go back';
 
   return (
     <View style={styles.container}>
-      {/* Back button */}
-      <TouchableOpacity style={styles.backButton} activeOpacity={0.7}>
+      {/* 1. Functional Back button */}
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={onGoBack}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={goBackLabel}
+      >
         <Ionicons name="arrow-back" size={20} color={COLORS.textPrimary} />
-        <Text style={styles.backText}>Go back</Text>
+        <Text style={styles.backText}>{goBackLabel}</Text>
       </TouchableOpacity>
 
-      {/* Right controls: Demo User Switcher & Language Switcher */}
+      {/* 2. Right controls: Demo User Switcher & Language Switcher */}
       <View style={styles.rightGroup}>
-        {/* User Switcher Pill for evaluator */}
+        {/* Compact User Switcher Chip for evaluator testing */}
         {currentUser && (
           <TouchableOpacity
             style={styles.userSwitcherPill}
@@ -27,11 +43,11 @@ export const HeaderBar = ({ currentLanguage, onToggleLanguage, currentUser, user
             <Text style={styles.userNameText} numberOfLines={1}>
               {currentUser.name.split(' ')[0]}
             </Text>
-            <Ionicons name="swap-horizontal" size={14} color={COLORS.primary} style={{ marginLeft: 4 }} />
+            <Ionicons name="swap-horizontal" size={13} color={COLORS.primary} style={{ marginLeft: 3 }} />
           </TouchableOpacity>
         )}
 
-        {/* Language Toggle Pill: ENG | हिंदी */}
+        {/* Functional Language Toggle: ENG | हिंदी */}
         <View style={styles.langContainer}>
           <TouchableOpacity
             style={[styles.langSegment, currentLanguage === 'ENG' && styles.langSegmentActive]}
@@ -50,7 +66,7 @@ export const HeaderBar = ({ currentLanguage, onToggleLanguage, currentUser, user
         </View>
       </View>
 
-      {/* User Switcher Modal */}
+      {/* User Switcher Modal for Evaluators */}
       <Modal visible={userModalVisible} transparent animationType="fade" onRequestClose={() => setUserModalVisible(false)}>
         <TouchableOpacity
           style={styles.modalOverlay}
@@ -59,13 +75,13 @@ export const HeaderBar = ({ currentLanguage, onToggleLanguage, currentUser, user
         >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Switch Demo User</Text>
+              <Text style={styles.modalTitle}>{t.switchUser || 'Switch Demo User'}</Text>
               <TouchableOpacity onPress={() => setUserModalVisible(false)}>
                 <Ionicons name="close" size={20} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
             <Text style={styles.modalSubtitle}>
-              Test different participation states (Registered vs Unregistered):
+              Test user participation states (Pre-registered vs Unregistered):
             </Text>
             <FlatList
               data={users}
@@ -138,7 +154,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    marginRight: 6,
+    marginRight: 5,
   },
   userNameText: {
     fontSize: 12,

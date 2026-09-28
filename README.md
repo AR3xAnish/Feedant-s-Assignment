@@ -1,18 +1,28 @@
 # Feedants Competition Details System — Full-Stack Technical Assignment
 
-> Production-quality, dynamic full-stack implementation of the **Feedants Competition Details** screen built with **React Native (Expo)**, **Node.js + Express.js**, and **MongoDB**. Designed for real-world high concurrency, resilient time-dependent lifecycle state machines, and pixel-accurate visual fidelity.
+> Production-quality, dynamic full-stack implementation of the **Feedants Competition Details** screen built with **React Native (Expo SDK 57)**, **Node.js + Express.js**, and **MongoDB**. Designed for real-world high concurrency, resilient time-dependent lifecycle state machines, and pixel-accurate visual fidelity.
 
 ---
 
 ## 📱 Live Feature Highlights
 
-- **Visual Fidelity**: Pixel-accurate recreation of the Feedants Competition Details screen (Header, Judge Card, Countdown, Important Dates 2x2 Grid, Previous Winners Carousel, Tabbed Guidelines, Tiered Rewards, Trust & Policies, Referral System, Reviews, Floating Action CTA, and Navigation Bar).
-- **100% Dynamic Backend Data**: Zero hardcoded competition data in the frontend. All details, judges, countdowns, timestamps, spots, and previous winners are served dynamically from MongoDB.
-- **Authoritative Competition Lifecycle**: Backend-enforced time-dependent state machine (`UPCOMING` ➔ `REGISTRATION_OPEN` ➔ `REGISTRATION_CLOSED` ➔ `SUBMISSION_OPEN` ➔ `JUDGING` ➔ `COMPLETED`).
-- **Concurrent Registration & Capacity Protection**: Prevents race conditions and overbooking using atomic conditional updates (`$inc` guarded with `{ bookedSpots: { $lt: maxParticipants } }`) and compound database-level unique indexes (`{ competitionId: 1, userId: 1 }`).
-- **Multi-State Testing & Demo User Switcher**: Easily switch between registered users (`Aakash Sharma` ➔ `[✓ Registered]` & `Upload Submission`) and unregistered users (`Priya Patel` ➔ `Register Now - ₹99` & `Only 19 spots left`) directly within the UI header.
-- **Idempotency & Replay Protection**: API supports `Idempotency-Key` headers to protect mobile users against duplicate payments or double-taps on poor network connectivity.
-- **Automated Concurrency Stress Testing**: Built-in automated simulation script testing simultaneous bursts of requests on limited spots with zero race conditions.
+- **Visual Fidelity**: Pixel-accurate recreation of the Feedants Competition Details screen (Header, Judge Card, Contextual Countdown, Important Dates 2x2 Grid, Previous Winners Carousel, Tabbed Guidelines, Tiered Rewards, Trust & Policies, Referral System, Reviews, Floating Action CTA, and Navigation Bar).
+- **100% Dynamic Backend Data**: Zero hardcoded competition data in the frontend. All details, judges, countdowns, timestamps, spots, rules, perks, and previous winners are served dynamically from MongoDB.
+- **Authoritative Competition Lifecycle**: Backend-enforced state machine separating macro phases (`UPCOMING`, `REGISTRATION_OPEN`, `REGISTRATION_AND_SUBMISSION_OPEN`, `SUBMISSION_OPEN`, `JUDGING`, `COMPLETED`) from granular user action permissions (`canRegister`, `canSubmit`).
+- **Contextual Countdown Presentation**: Never falsely claims "Registration closes in" when a competition is upcoming, completed, judging, or full.
+- **Concurrent Registration & Capacity Protection**:
+  - **Primary Production Path**: Multi-document ACID MongoDB Transactions using `session.withTransaction()` with automatic retries on transient write conflicts.
+  - **Development Fallback**: Explicit limited non-transactional atomic conditional counter update with compensating rollback, used solely when running against single-node standalone MongoDB.
+- **Scoped Idempotency & Replay Protection**: API scopes idempotency strictly to `(competitionId + userId + idempotencyKey)` and returns the identical logical operation payload on retries without re-incrementing capacity. The mobile client preserves a stable session key across retries.
+- **Active vs Cancelled Participation**: Only `CONFIRMED` registrations count as active participation. Cancelled registrations do not block re-registration and cannot submit entries.
+- **Duplicate Submission Concurrency Guard**: Rejects simultaneous duplicate submission attempts with HTTP 409 `ALREADY_SUBMITTED`.
+- **Real Media Playback**: Judge introduction and previous winner reels stream genuine video and audio using native HTML5 `<video>` for web and `expo-av` for native iOS/Android.
+- **Functional Interactive Actions**:
+  - **Go back**: Working action displaying competition selector.
+  - **Copy Link**: Actually copies the referral URL to system clipboard with visual feedback.
+  - **Refer Now**: Triggers the genuine OS native sharing sheet via React Native's `Share.share` API.
+  - **Lightweight Localization**: Instant language toggle between English and Hindi (`ENG` / `हिंदी`) for key UI labels.
+  - **Demo User Switcher**: Easily switch between registered users (`Aakash Sharma` ➔ `[✓ Registered]` & `Upload Submission`) and unregistered users (`Priya Patel` ➔ `Register Now - ₹99` & `Only 19 spots left`) directly within the UI header.
 
 ---
 
@@ -20,10 +30,10 @@
 
 | Layer | Technologies | Rationale |
 | :--- | :--- | :--- |
-| **Frontend** | React Native (Expo SDK 57), React 19, `@expo/vector-icons`, React Native Web | Cross-platform native mobile performance (iOS, Android) plus instant web preview capability without environment lock-in. |
+| **Frontend** | React Native (Expo SDK 57), React 19, `@expo/vector-icons`, `expo-av`, React Native Web | Cross-platform native mobile performance (iOS, Android) plus instant web preview capability with real media streaming. |
 | **Backend** | Node.js (v22), Express.js (v4), Mongoose (v8) | Lightweight, asynchronous, high-throughput I/O suited for event-driven concurrency and rapid schema validation. |
-| **Database** | MongoDB (v7+) | Flexible document data model with native atomic conditional operators and compound unique index constraints. |
-| **Testing** | Jest, Supertest | Comprehensive automated integration tests for business logic, capacity guards, and API boundaries. |
+| **Database** | MongoDB (v8+) | Document database supporting multi-document ACID transactions, atomic conditional operators, and compound unique constraints. |
+| **Testing** | Jest, Supertest, `mongodb-memory-server` | Integration test suite executing multi-document transactions against an in-memory replica set. |
 
 ---
 
@@ -55,16 +65,16 @@ Blaccskull assignment/
 │   │   │   ├── competitionRoutes.js
 │   │   │   └── userRoutes.js
 │   │   ├── services/
-│   │   │   ├── competitionService.js  # Read queries, submission logic
-│   │   │   ├── lifecycleService.js    # Chronological lifecycle & countdown math
-│   │   │   └── registrationService.js # Atomic capacity reservation & rollback
+│   │   │   ├── competitionService.js  # Confirmed registration check & submission races
+│   │   │   ├── lifecycleService.js    # Decoupled phase & action permissions
+│   │   │   └── registrationService.js # Primary transaction path + dev fallback
 │   │   ├── scripts/
 │   │   │   ├── seed.js                # Database seeder matching reference design
-│   │   │   └── testConcurrency.js     # Stress test script (10 concurrent users -> 2 spots)
+│   │   │   └── testConcurrency.js     # Standalone concurrency stress test script
 │   │   └── utils/
 │   │       └── errors.js              # Standard operational AppError class
 │   └── tests/
-│       └── competition.test.js        # Automated Jest + Supertest test suite
+│       └── competition.test.js        # Automated Jest suite with in-memory replica set
 │
 └── mobile/                            # React Native Application (Expo)
     ├── App.js                         # Root application entry
@@ -75,27 +85,28 @@ Blaccskull assignment/
         │   └── competitionApi.js      # REST API client
         ├── components/
         │   ├── HeaderBar.js           # Back button, Language toggle, Demo User Switcher
-        │   ├── SummaryCard.js         # Title, tags, prize pool, entry fee, capacity bar
-        │   ├── JudgeCard.js           # Judge avatar, title, experience, intro video CTA
-        │   ├── CountdownBanner.js     # Real-time ticking countdown bar
+        │   ├── SummaryCard.js         # Title, tags, dynamic perks, prize pool, capacity bar
+        │   ├── JudgeCard.js           # Judge avatar, title, experience, real video trigger
+        │   ├── CountdownBanner.js     # Context-aware countdown banner
         │   ├── ImportantDatesGrid.js  # 2x2 dates matrix with icons
         │   ├── PreviousWinnersCarousel.js # Horizontal video thumbnail reel
-        │   ├── CompetitionTabsSection.js # About, Judging Criteria, Rules tabs
+        │   ├── CompetitionTabsSection.js # Dynamic About, Judging Criteria, Rules tabs
         │   ├── RewardsSection.js      # Tiered reward cards (1st to 6th position)
         │   ├── DisclaimerBanner.js    # Paid participant disclaimer
         │   ├── TrustPolicySection.js  # Prize disbursement & Razorpay trust cards
-        │   ├── ReferralBanner.js      # Referral link copy & earning banner
+        │   ├── ReferralBanner.js      # Real clipboard copy & native share sheet
         │   ├── UserReviewsCard.js     # Participant reviews modal trigger
         │   ├── AdBanner.js            # Ad slot placeholder
         │   ├── BottomCTA.js           # Dynamic floating action button
         │   ├── BottomNav.js           # 5-tab bottom navigation bar
-        │   └── Modals.js              # Registration, submission, and video modals
+        │   └── Modals.js              # Registration, submission, and genuine video player
         ├── hooks/
         │   └── useCountdown.js        # Real-time countdown hook
         ├── styles/
         │   └── colors.js              # Exact Feedants UI color palette
         └── utils/
-            └── formatters.js          # INR currency, date, and time formatters
+            ├── formatters.js          # INR currency, date, and time formatters
+            └── i18n.js                # Lightweight English/Hindi dictionary
 ```
 
 ---
@@ -135,7 +146,7 @@ The seed script initializes:
 ### 3. Start the Backend API
 
 ```bash
-# Start the production backend server
+# Start the backend server
 npm start
 
 # Or run with auto-reload in development
@@ -169,79 +180,67 @@ For web preview, open `http://localhost:8081` in Chrome/Edge.
 
 ---
 
-## 🧪 Testing & Concurrency Verification
+## 🧪 Testing & Verification
 
-### 1. Run Automated Unit & Integration Tests
+### 1. Automated Integration Test Suite (with Replica Set & Transactions)
 
 ```bash
 cd backend
 npm test
 ```
-**Test Coverage Includes:**
-- Dynamic lifecycle status & countdown calculation.
-- Header-based user participation resolution.
-- Valid registration & capacity decrement.
-- Duplicate registration rejection (HTTP 409 `ALREADY_REGISTERED`).
-- Overcapacity rejection when competition is full (HTTP 409 `COMPETITION_FULL`).
-- Rejection of registrations after deadline (HTTP 400 `REGISTRATION_CLOSED`).
-- Video submission verification (eligible registered participants vs unregistered rejections).
+The test suite spins up an in-memory replica set via `mongodb-memory-server` to execute **genuine MongoDB Multi-Document ACID Transactions**.
 
-### 2. Run High-Concurrency Stress Test
+**12 Automated Tests Covering:**
+1. Decoupled permission flags (`canRegister`, `canSubmit`) and contextual countdown types.
+2. User participation resolution for confirmed registrations.
+3. Concurrent capacity race: 6 users racing for 2 spots (exactly 2 succeed, 4 receive `COMPETITION_FULL`, 0 overbooking).
+4. Concurrent duplicate registration: same user firing 4 simultaneous requests (1 succeeds, 3 receive `ALREADY_REGISTERED`).
+5. Scoped idempotency retry: identical logical result returned without double-decrementing capacity.
+6. Cancelled registration handling: users with `status: 'CANCELLED'` cannot submit entries (HTTP 403 `REGISTRATION_REQUIRED`).
+7. Registration reactivation: users with cancelled records can re-register and reactivate their spot.
+8. Duplicate submission race: simultaneous submission calls return HTTP 409 `ALREADY_SUBMITTED`.
+9. Overlapping window verification: simultaneous registration and submission allowances.
+10. Full competition rejection (HTTP 409 `COMPETITION_FULL`).
+11. Expired deadline rejection (HTTP 400 `REGISTRATION_CLOSED`).
+12. Upcoming competition rejection (HTTP 400 `REGISTRATION_NOT_STARTED`).
+
+### 2. Standalone Concurrency Stress Test (Development Fallback Verification)
 
 ```bash
 cd backend
 npm run test:concurrency
 ```
-**What this test does:**
-1. Spawns an isolated competition with 5 max capacity where 3 spots are already taken (**only 2 spots remaining**).
-2. Creates 10 distinct users who fire simultaneous `registerUser` calls concurrently using `Promise.allSettled`.
-3. Verifies that:
-   - **Exactly 2 requests succeed** (HTTP 201).
-   - **Exactly 8 requests fail** gracefully with HTTP 409 `COMPETITION_FULL`.
-   - `bookedSpots` in MongoDB never exceeds 5.
-   - Total registrations recorded in MongoDB equals exactly 2.
+Tests 10 simultaneous registration attempts targeting 2 remaining spots against the local standalone MongoDB instance using the limited non-transactional development fallback.
 
 ---
 
-## 🔒 Concurrency & Capacity Protection Strategy
+## 🔒 Concurrency & Registration Consistency Strategy
 
-### The Race Condition Problem
-In flash registrations (e.g. 1 spot left with 50 simultaneous taps):
+### 1. Primary Production Path (ACID Multi-Document Transactions)
+When connected to a MongoDB Replica Set or MongoDB Atlas, `RegistrationService` executes all state mutations inside a transaction:
+```javascript
+await session.withTransaction(async () => {
+  // 1. Atomic capacity guard & reservation
+  const updatedComp = await Competition.findOneAndUpdate(
+    { _id: competitionId, bookedSpots: { $lt: competition.maxParticipants } },
+    { $inc: { bookedSpots: 1 } },
+    { session, new: true }
+  );
+  if (!updatedComp) throw new AppError('Competition is full', 409, 'COMPETITION_FULL');
+
+  // 2. Active participation check
+  const activeReg = await Registration.findOne({ competitionId, userId, status: 'CONFIRMED' }).session(session);
+  if (activeReg) throw new AppError('Already registered', 409, 'ALREADY_REGISTERED');
+
+  // 3. Insert or reactivate registration inside transaction
+  ...
+});
 ```
-Naïve Approach:
-1. User A reads bookedSpots = 19
-2. User B reads bookedSpots = 19
-3. User A checks 19 < 20 (true), increments to 20, inserts Registration
-4. User B checks 19 < 20 (true), increments to 21, inserts Registration
-=> Result: 21 participants booked for a 20-person competition (Overbooking Bug)
-```
+- `session.withTransaction()` automatically catches and retries `TransientTransactionError` (such as `WriteConflict` code 112) under high concurrent load.
 
-### Production Two-Tier Protection
-
-1. **Atomic Conditional Counter Update (`$inc` with filter predicate)**:
-   ```javascript
-   const updatedComp = await Competition.findOneAndUpdate(
-     {
-       _id: competitionId,
-       bookedSpots: { $lt: competition.maxParticipants }
-     },
-     { $inc: { bookedSpots: 1 } },
-     { new: true }
-   );
-   if (!updatedComp) {
-     throw new AppError('Competition is full', 409, 'COMPETITION_FULL');
-   }
-   ```
-   Because MongoDB executes single-document operations atomically at the storage engine level, only requests that match `{ bookedSpots: { $lt: maxParticipants } }` succeed. Any request that executes after capacity is reached returns `null` and is immediately rejected with HTTP 409.
-
-2. **Compound Unique Index on Registrations**:
-   ```javascript
-   registrationSchema.index({ competitionId: 1, userId: 1 }, { unique: true });
-   ```
-   If a user double-taps the register button simultaneously or retries a request, MongoDB enforces physical uniqueness. If an insert fails due to duplicate key error `E11000`, the spot increment is safely rolled back using `$inc: { bookedSpots: -1 }`.
-
-3. **Client Idempotency Header**:
-   Clients can supply an `Idempotency-Key` header (e.g. UUID). If the client disconnects before receiving the response and retries, the backend returns the existing confirmed registration without re-charging or re-incrementing capacity.
+### 2. Limited Non-Transactional Development Fallback
+When running against a single-node standalone MongoDB instance (where replica sets are unsupported), the service uses an atomic conditional counter update (`$inc` guarded with `{ bookedSpots: { $lt: maxParticipants } }`) and rolls back the counter (`$inc: -1`) if record insertion fails.
+*Documentation Notice: This fallback is retained exclusively for local development on single-node MongoDB and is not equivalent to an ACID transaction.*
 
 ---
 
@@ -249,123 +248,29 @@ Naïve Approach:
 
 ### Base URL: `/api/v1`
 
-#### `GET /competitions`
-- **Description**: Returns all competitions with computed lifecycle status and remaining capacity.
-- **Status Codes**: `200 OK`.
-
 #### `GET /competitions/:id`
-- **Description**: Returns complete details of a competition, computed countdowns, and optional user participation status.
-- **Headers**:
-  - `x-user-id` *(optional)*: Current authenticated demo user ID.
-- **Response `200 OK`**:
-  ```json
-  {
-    "success": true,
-    "data": {
-      "competition": {
-        "_id": "6aba3a9647dc6d57dd82a6b2",
-        "title": "Feedants Classical Dance",
-        "prizePool": 1500,
-        "entryFee": 99,
-        "maxParticipants": 20,
-        "bookedSpots": 1,
-        "judge": {
-          "name": "Manju Dubey",
-          "title": "Professional Kathak Dancer",
-          "experience": "12+ Years of Experience"
-        },
-        "importantDates": { ... },
-        "rewards": [ ... ]
-      },
-      "computed": {
-        "lifecycleStatus": "REGISTRATION_OPEN",
-        "isRegistrationOpen": true,
-        "isSubmissionOpen": true,
-        "isFull": false,
-        "spotsLeft": 19,
-        "registrationCountdown": {
-          "totalSecondsRemaining": 109712,
-          "days": 1,
-          "hours": 6,
-          "minutes": 28,
-          "seconds": 32,
-          "formatted": "01d : 06h : 28m : 32s"
-        }
-      },
-      "userParticipation": {
-        "isRegistered": true,
-        "registrationId": "6aba3a9647dc6d57dd82a6b4",
-        "hasSubmitted": false
-      }
-    }
-  }
-  ```
+- Returns competition details, permissions (`canRegister`, `canSubmit`), contextual countdown config, and user participation status.
 
 #### `POST /competitions/:id/register`
-- **Description**: Atomically registers the user for the competition.
-- **Headers**:
-  - `x-user-id` *(required)*: User ID.
-  - `Idempotency-Key` *(optional)*: Replay protection key.
-- **Body**: `{ "paymentMethod": "demo_razorpay" }`
-- **Response `201 Created`**:
-  ```json
-  {
-    "success": true,
-    "message": "Registration successful!",
-    "data": {
-      "registration": { ... },
-      "competition": { ... },
-      "computed": { ... }
-    }
-  }
-  ```
-- **Error Codes**:
-  - `400 REGISTRATION_CLOSED`: Deadline passed.
-  - `400 REGISTRATION_NOT_STARTED`: Competition upcoming.
-  - `409 ALREADY_REGISTERED`: User has already registered.
-  - `409 COMPETITION_FULL`: All spots taken.
+- Headers: `x-user-id` (required), `Idempotency-Key` (optional).
+- Body: `{ "paymentMethod": "demo_razorpay" }`
+- Responses: `201 Created`, `400 Bad Request`, `409 Conflict`.
 
 #### `POST /competitions/:id/submissions`
-- **Description**: Submits an entry for evaluation.
-- **Headers**:
-  - `x-user-id` *(required)*: Must belong to a registered user.
-- **Body**:
-  ```json
-  {
-    "title": "Kathak Tarana in Teentaal",
-    "videoUrl": "https://video.feedants.com/entry.mp4",
-    "description": "Solo classical performance"
-  }
-  ```
-- **Response `201 Created`**.
-- **Error Codes**:
-  - `403 REGISTRATION_REQUIRED`: User is not registered.
-  - `400 SUBMISSION_CLOSED`: Submission deadline passed.
-  - `409 ALREADY_SUBMITTED`: Only 1 submission allowed per user.
-
-#### `GET /users` & `GET /users/me`
-- **Description**: Lists available demo users and checks active user profile.
+- Headers: `x-user-id` (required).
+- Body: `{ "title": "Kathak Tarana", "videoUrl": "https://...", "description": "Notes" }`
+- Responses: `201 Created`, `403 Forbidden` (`REGISTRATION_REQUIRED`), `409 Conflict` (`ALREADY_SUBMITTED`).
 
 ---
 
-## 💡 Important Assumptions, Technical Decisions & Trade-Offs
+## 💡 Important Assumptions & Known Limitations
 
 ### 1. Assumptions Made
-- **Overlapping Phases**: As reflected in the reference design, submission starts (6 Aug) before registration ends (10 Aug). The system supports overlapping phases where a user who registers early can submit immediately while registrations remain open for others.
-- **Lightweight Authentication**: A realistic `x-user-id` header approach was chosen for demo evaluation rather than a full JWT OAuth server, allowing the evaluator to switch users instantaneously in the header without logging in/out.
-- **Mock Payment Gateway**: A Razorpay integration simulation is provided in the mobile client and backend. Upon confirmation, the backend assigns a realistic Razorpay payment ID (`pay_razorpay_...`) and transitions the registration status to `CONFIRMED`.
+- **Overlapping Lifecycle Windows**: Submissions can open before registration closes. The system supports overlapping phases where registered users can submit entries while new users can still register.
+- **Authentication**: A lightweight `x-user-id` header approach was chosen to allow evaluators to switch users effortlessly directly within the UI header without having to log in/out.
+- **Payment Gateway**: Simulated Razorpay checkout flow assigns realistic payment IDs (`pay_razorpay_...`) and transitions registration to `CONFIRMED`.
 
-### 2. Major Technical Decisions
-- **Layered Clean Architecture**: Strict separation of concerns (Route -> Controller -> Service -> Model) ensures that business rules and validation are never tangled in route handlers or UI components.
-- **Authoritative Server Validation**: All countdowns, capacity checks, and eligibility checks are validated server-side. The client's clock is never trusted.
-- **Compound Unique Constraints**: Uniqueness is enforced at the database storage engine level, rendering race conditions impossible.
-
-### 3. Trade-offs Considered
-- **In-Memory Locking vs Atomic Database Operators**: In-memory mutexes (such as `async-mutex`) only protect a single Node.js instance. In a scaled environment with multiple Node.js instances behind a load balancer, in-memory locks fail. MongoDB's atomic `$inc` with query filter works across multiple backend instances reliably without introducing Redis.
-- **Denormalized Judge & Dates in Competition**: Embedded the judge and date objects inside the `Competition` document to optimize read performance and avoid expensive multi-collection joins for the competition details view.
-
-### 4. What Would Be Improved for Production
-1. **Redis Caching with Read-Through**: Cache high-traffic competition metadata with sub-second TTL or cache-invalidation on registration events to support 50,000+ RPS.
-2. **Actual Razorpay Webhook Signatures**: Verify HMAC SHA256 webhook signatures from Razorpay for asynchronous payment confirmation.
-3. **Cloud Object Storage Video Upload**: Direct-to-S3 presigned URLs for video submissions with transcoding pipelines (e.g., AWS Elemental MediaConvert / Cloudflare Stream).
-4. **WebSocket / Server-Sent Events (SSE)**: Real-time spot counter decrement updates pushed to all open client screens as spots are booked.
+### 2. Remaining Limitations for Future Production
+1. **Webhook Processing**: In a real production setup, payment confirmation would be processed asynchronously via cryptographically verified Razorpay webhooks (`razorpay_signature`).
+2. **Distributed Caching (Redis)**: Under 50,000+ RPS read traffic, caching competition metadata in Redis with cache-invalidation on registration events would minimize database read load.
+3. **Presigned Cloud Uploads**: Real user video uploads would generate presigned S3/GCS upload URLs rather than submitting raw video URLs.
